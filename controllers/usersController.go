@@ -71,9 +71,9 @@ func Login(c *gin.Context) {
 
 	// Look up requested user
 	var user models.User
-	initializers.DB.First(&user, "email = ?", body.Email)
+	result := initializers.DB.First(&user, "email = ?", body.Email)
 
-	if user.ID == 0 {
+	if result.Error != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid email or password",
 		})

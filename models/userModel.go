@@ -2,12 +2,10 @@ package models
 
 import (
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type User struct {
-	gorm.Model
+	Base
 	FirstName    string
 	LastName     string
 	DateOfBirth  time.Time
