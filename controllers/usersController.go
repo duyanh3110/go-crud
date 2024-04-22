@@ -1,8 +1,12 @@
 package controllers
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"go-crud/initializers"
 	"go-crud/models"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -114,6 +118,93 @@ func Login(c *gin.Context) {
 	c.SetCookie("Authorization", tokenString, 3600*24*30, "", "", false, true)
 
 	c.JSON(http.StatusOK, gin.H{})
+}
+
+type GoogleClaims struct {
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+	FirstName     string `json:"given_name"`
+	LastName      string `json:"family_name"`
+	jwt.Claims
+}
+
+func getGooglePublicKey(keyID string) (string, error) {
+	resp, err := http.Get("https://www.googleapis.com/oauth2/v1/certs")
+	if err != nil {
+		return "", err
+	}
+	dat, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	myResp := map[string]string{}
+	err = json.Unmarshal(dat, &myResp)
+	if err != nil {
+		return "", err
+	}
+	key, ok := myResp[keyID]
+	if !ok {
+		return "", errors.New("key not found")
+	}
+	return key, nil
+}
+
+func ValidateGoogleJWT(tokenString string) (GoogleClaims, error) {
+	claimsStruct := GoogleClaims{}
+
+	token, err := jwt.ParseWithClaims(tokenString, &claimsStruct, func(token *jwt.Token) (interface{}, error) {
+		pem, err := getGooglePublicKey(fmt.Sprintf("%s", token.Header["kid"]))
+		if err != nil {
+			fmt.Println("get GG PublicKey failed")
+			return nil, err
+		}
+		key, err := jwt.ParseRSAPublicKeyFromPEM([]byte(pem))
+		if err != nil {
+			fmt.Println("make key failed")
+			return nil, err
+		}
+		return key, nil
+	})
+	if err != nil {
+		fmt.Println("parse key failed")
+		return GoogleClaims{}, err
+	}
+
+	claims, ok := token.Claims.(*GoogleClaims)
+	if !ok {
+		fmt.Println("jwt code invalid")
+		return GoogleClaims{}, errors.New("invalid Google JWT")
+	}
+
+	return *claims, nil
+}
+
+func SsoLogin(c *gin.Context) {
+	var body struct {
+		tokenString string
+	}
+
+	if c.Bind(&body) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Failed to read body",
+		})
+
+		return
+	}
+
+	claims, err := ValidateGoogleJWT(body.tokenString)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err,
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"user": claims,
+	})
 }
 
 func UsersUpdate(c *gin.Context) {
